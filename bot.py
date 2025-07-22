@@ -1,44 +1,78 @@
 from flask import Flask, request, jsonify
 import os
 import telebot
+import logging
+
+# Настройка логгирования
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-bot = telebot.TeleBot(os.environ['7523520150:AAGMPibPAl8D0I0E6ZeNR3zuIp0qKcshXN0'])
+bot = telebot.TeleBot(os.environ['TELEGRAM_TOKEN'])
 
-# Тестовый маршрут для проверки
-@app.route('/test')
-def test():
-    return jsonify({"status": "ok", "message": "API работает"}), 200
+# Проверочный эндпоинт
+@app.route('/')
+def home():
+    return "🎰 Слот-бот готов к работе! Домен: pystzarabotaet.vercel.app"
 
-# Основной маршрут для вебхука
+@app.route('/api/health')
+def health_check():
+    return jsonify({"status": "ok", "domain": "pystzarabotaet.vercel.app"})
+
+# Вебхук для Telegram
 @app.route('/api/webhook', methods=['POST'])
 def webhook():
-    if request.headers.get('X-Telegram-Bot-Api-Secret-Token') != os.environ['WEBHOOK_SECRET']:
-        return jsonify({"error": "Unauthorized"}), 403
-    
     try:
+        # Проверка секретного ключа
+        if request.headers.get('X-Telegram-Bot-Api-Secret-Token') != os.environ['WEBHOOK_SECRET']:
+            logger.warning("Неавторизованный запрос вебхука")
+            return jsonify({"error": "Unauthorized"}), 403
+        
         update = telebot.types.Update.de_json(request.get_json())
         bot.process_new_updates([update])
         return jsonify({"status": "success"}), 200
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.error(f"Ошибка вебхука: {e}")
+        return jsonify({"error": "Internal server error"}), 500
 
+# Команда /start
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.send_message(message.chat.id, "✅ Бот успешно подключен!")
+    try:
+        bot.send_message(
+            message.chat.id,
+            "🎉 Бот успешно работает на Vercel!\n"
+            f"Домен: pystzarabotaet.vercel.app\n\n"
+            "Отправьте /spin для теста игры"
+        )
+    except Exception as e:
+        logger.error(f"Ошибка команды start: {e}")
 
-# Инициализация вебхука
-def setup_webhook():
+# Команда /spin (тестовая)
+@bot.message_handler(commands=['spin'])
+def spin(message):
+    try:
+        symbols = ['🍒', '🍋', '💎', '7️⃣']
+        result = random.choices(symbols, k=3)
+        win = "100 (тест)" if len(set(result)) == 1 else "0 (тест)"
+        
+        bot.send_message(
+            message.chat.id,
+            f"🎰 Результат: {' '.join(result)}\n"
+            f"💰 Выигрыш: {win}\n\n"
+            "Бот работает корректно!"
+        )
+    except Exception as e:
+        logger.error(f"Ошибка команды spin: {e}")
+
+# Настройка вебхука при деплое
+if __name__ == '__main__':
     bot.remove_webhook()
-    webhook_url = f"{os.environ['VERCEL_URL']}/api/webhook"
+    bot.polling(none_stop=True)
+else:
+    bot.remove_webhook()
     bot.set_webhook(
-        url=webhook_url,
+        url=f"https://pystzarabotaet.vercel.app/api/webhook",
         secret_token=os.environ['WEBHOOK_SECRET']
     )
-    print(f"Webhook установлен на: {webhook_url}")
-
-# Для локального тестирования
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
-else:
-    setup_webhook()
+    logger.info("Вебхук установлен для Vercel")
