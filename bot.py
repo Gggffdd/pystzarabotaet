@@ -8,7 +8,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-bot = telebot.TeleBot(os.environ['TELEGRAM_TOKEN'])
+bot = telebot.TeleBot(os.environ['7523520150:AAGMPibPAl8D0I0E6ZeNR3zuIp0qKcshXN0'])
 
 # Проверочный эндпоинт
 @app.route('/')
