@@ -6,16 +6,16 @@ import telebot
 from telebot import types
 
 # ==========================================
-# НАСТРОЙКА ПРИЛОЖЕНИЯ
+# КОНФИГУРАЦИЯ (прямое указание данных)
+# ==========================================
+TELEGRAM_TOKEN = '7523520150:AAGMPibPAl8D0I0E6ZeNR3zuIp0qKcshXN0'
+WEBHOOK_SECRET = 'l97EqzQhw2lhSb3Ci2e-zg-nk9y4vG3-NLWA3ebnFpQ'
+VERCEL_URL = 'https://pystzarabotaet.vercel.app'
+
+# ==========================================
+# ИНИЦИАЛИЗАЦИЯ
 # ==========================================
 app = Flask(__name__)
-
-# Конфигурация
-TELEGRAM_TOKEN = os.environ['TELEGRAM_TOKEN']
-WEBHOOK_SECRET = os.environ['WEBHOOK_SECRET']
-VERCEL_URL = os.environ.get('VERCEL_URL', 'https://pystzarabotaet.vercel.app')
-
-# Инициализация бота
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
 # Настройка логирования
@@ -26,22 +26,22 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ==========================================
-# ИГРОВАЯ ЛОГИКА
+# ИГРОВЫЕ НАСТРОЙКИ
 # ==========================================
 SLOT_SYMBOLS = ['🍒', '🍋', '🍇', '🍉', '🔔', '💎', '7️⃣', '🐶']
 INITIAL_BALANCE = 1000
 MIN_BET = 10
 MAX_BET = 500
 
-# Временное хранилище (в продакшене используйте БД)
+# База данных в памяти
 users_db = {}
 
 def get_user(user_id):
-    """Получение или создание пользователя"""
     if user_id not in users_db:
         users_db[user_id] = {
             'balance': INITIAL_BALANCE,
-            'bet': 100
+            'bet': 100,
+            'last_spin': None
         }
     return users_db[user_id]
 
@@ -50,16 +50,14 @@ def get_user(user_id):
 # ==========================================
 @app.route('/')
 def home():
-    """Проверочная страница"""
     return jsonify({
         "status": "running",
         "bot": "Dog House Slots",
-        "domain": VERCEL_URL
+        "version": "1.0"
     })
 
 @app.route('/api/health')
 def health_check():
-    """Проверка работоспособности API"""
     return jsonify({
         "status": "ok",
         "telegram": "connected",
@@ -68,10 +66,7 @@ def health_check():
 
 @app.route('/api/webhook', methods=['POST'])
 def webhook():
-    """Обработчик вебхука от Telegram"""
-    # Проверка секретного ключа
     if request.headers.get('X-Telegram-Bot-Api-Secret-Token') != WEBHOOK_SECRET:
-        logger.warning("Неавторизованный запрос вебхука")
         return jsonify({"error": "Unauthorized"}), 403
     
     try:
@@ -79,7 +74,7 @@ def webhook():
         bot.process_new_updates([update])
         return jsonify({"status": "success"}), 200
     except Exception as e:
-        logger.error(f"Ошибка обработки вебхука: {e}")
+        logger.error(f"Webhook error: {e}")
         return jsonify({"error": "Internal server error"}), 500
 
 # ==========================================
@@ -87,25 +82,23 @@ def webhook():
 # ==========================================
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
-    """Обработчик команды /start"""
     try:
         user = get_user(message.from_user.id)
         bot.send_message(
             message.chat.id,
             f"🎰 Добро пожаловать в Dog House Slots!\n\n"
             f"💰 Баланс: {user['balance']} монет\n"
-            f"🪙 Текущая ставка: {user['bet']} монет\n\n"
-            "Используйте команды:\n"
+            f"🪙 Ставка: {user['bet']} монет\n\n"
+            "Доступные команды:\n"
             "/spin - Крутить слоты\n"
             "/bet - Изменить ставку",
             parse_mode='Markdown'
         )
     except Exception as e:
-        logger.error(f"Ошибка в send_welcome: {e}")
+        logger.error(f"Start command error: {e}")
 
 @bot.message_handler(commands=['spin'])
 def spin(message):
-    """Обработчик игры"""
     try:
         user = get_user(message.from_user.id)
         
@@ -114,10 +107,11 @@ def spin(message):
         
         # Генерация результата
         result = [random.choice(SLOT_SYMBOLS) for _ in range(3)]
-        win = 100 if len(set(result)) == 1 else 0  # Упрощенная логика выигрыша
+        win = 100 if len(set(result)) == 1 else 0
         
         # Обновление баланса
         user['balance'] += win - user['bet']
+        user['last_spin'] = {'result': result, 'win': win}
         
         # Отправка результата
         bot.send_message(
@@ -129,14 +123,13 @@ def spin(message):
             parse_mode='Markdown'
         )
     except Exception as e:
-        logger.error(f"Ошибка в spin: {e}")
+        logger.error(f"Spin error: {e}")
 
 @bot.message_handler(commands=['bet'])
 def change_bet(message):
-    """Изменение ставки"""
     try:
         user = get_user(message.from_user.id)
-        markup = types.InlineKeyboardMarkup()
+        markup = types.InlineKeyboardMarkup(row_width=3)
         markup.add(
             types.InlineKeyboardButton("-10", callback_data="bet_down"),
             types.InlineKeyboardButton(f"{user['bet']}", callback_data="bet_current"),
@@ -151,14 +144,13 @@ def change_bet(message):
             reply_markup=markup
         )
     except Exception as e:
-        logger.error(f"Ошибка в change_bet: {e}")
+        logger.error(f"Change bet error: {e}")
 
 # ==========================================
 # CALLBACK-ОБРАБОТЧИКИ
 # ==========================================
 @bot.callback_query_handler(func=lambda call: call.data.startswith('bet_'))
 def bet_callback(call):
-    """Обработчик изменения ставки"""
     try:
         user = get_user(call.from_user.id)
         action = call.data.split('_')[1]
@@ -177,29 +169,26 @@ def bet_callback(call):
         )
         bot.answer_callback_query(call.id, f"Ставка изменена: {user['bet']}")
     except Exception as e:
-        logger.error(f"Ошибка в bet_callback: {e}")
+        logger.error(f"Bet callback error: {e}")
 
 # ==========================================
-# НАСТРОЙКА ВЕБХУКА
+# ЗАПУСК ПРИЛОЖЕНИЯ
 # ==========================================
 def setup_webhook():
-    """Установка вебхука при запуске"""
     try:
         bot.remove_webhook()
         bot.set_webhook(
             url=f"{VERCEL_URL}/api/webhook",
-            secret_token=WEBHOOK_SECRET,
-            drop_pending_updates=True
+            secret_token=WEBHOOK_SECRET
         )
         logger.info(f"✅ Вебхук установлен на {VERCEL_URL}/api/webhook")
     except Exception as e:
-        logger.error(f"Ошибка настройки вебхука: {e}")
+        logger.error(f"Webhook setup error: {e}")
 
-# Автоматическая настройка при запуске на Vercel
-if os.environ.get('VERCEL') == '1':
-    setup_webhook()
+if __name__ == '__main__':
+    # Локальный режим (без вебхука)
+    bot.remove_webhook()
+    bot.polling(none_stop=True)
 else:
-    # Локальный режим для разработки
-    if __name__ == '__main__':
-        bot.remove_webhook()
-        bot.polling(none_stop=True)
+    # Режим Vercel (с вебхуком)
+    setup_webhook()
