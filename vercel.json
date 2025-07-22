@@ -13,7 +13,7 @@
       "methods": ["POST"]
     },
     {
-      "src": "/test",
+      "src": "/api/health",
       "dest": "app.py",
       "methods": ["GET"]
     },
